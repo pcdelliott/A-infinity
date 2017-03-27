@@ -88,86 +88,133 @@ def TopEdges(T, edgelist):
             temp.append(edge1)
     return(temp)
 
+def PaintEdgepath(a_type, location, edgelist, T):
+    edges_below = Edge_paths_below(location, edgelist, T)
+    monomial = a_type[0]
+    partition = list(prodlist(Mon_Part(monomial, edges_below, T)))
+    return partition
 
-def Paint(T, pot, edgelist):
+def PaintTop(T, pot, edgelist):
     if edgelist == ():
         return()
     numvars = len(pot[0])
     top = TopEdges(T, edgelist)
     a_list = A_interactions(edgelist, pot, T)
     # create lits of patterns, called pathlist. A pattern is a tuple
-    # ((a-type, edges),...) with one sub tuple for each edge in top.
+    # ((a_type, edges),...) with one sub tuple for each edge in top, where
+    # a_type is a tuple ofthe form (mon, theta_type, psi_type).
     templist = Empty(len(top))
-    l = []
     for item in a_list:
         temp = []
-        edge = item[0]        # identify the edge
-        edges_below = Edges_below(edge, edgelist)
-        mon = item[1][0]      # inentify the monomial
-        a = copy.copy(item[1])    # identify the a_type interaction
-        location = item[2]
-        a.append(location)
-        partition = Mon_Part(mon, edges_below)
-        temp = [[a,p] for p in partition[0]]
-
+        partition = PaintEdgepath(item[0], item[1][1], edgelist, T)
+        # collect together pairs [a_type, edgelist]
+        loc = item[1]
+        a = item[0] + [loc]
+        temp = [[a, p[0]] for p in partition]
         for i in range(0, len(top)):
-            if edge == top[i]:
-                if temp != []:
-                    templist[i] += temp
-
+            if IsAbove(item[1][1],top[i]) == 1:
+                templist[i] += temp
+    # collect togehter one pattern for each top edge
     pathlist = list(prodlist(templist))
-    return(pathlist)
 
+    # check that there are no intersecting edgepaths
+    newpathlist = []
+    for path in pathlist:
+        if OverlapsThetaPaths(Thetapaths(path), T) == 0:
+            if Psi_Test(path, T, pot) == 1:
+                newpathlist.append(path)
 
-def newconfigs(T, pot):
+    return(newpathlist)
+
+def Paint(T, pot):
     numvars = len(pot[0])
     edgelist = Edges(T)
-    pathlist = Paint(T, pot, edgelist)
+    pathlist = PaintTop(T, pot, edgelist)
     newpathlist = []
+    # prepare the output to be fed into FullPaint: collect unused edges and mark
+    # the patterns with 1 if there are edges still to paint. Also remove any
+    # edges which are used twice
     for pattern in pathlist:
-        edgelist = Edges(T)
-        while len(edgelist) > 0:
-            #collect us the edges used in a pattern
-            usededges = []
-            for path in pattern:
-                # if len(path) == 1:
-                #     return(path)
-                usededges += path[1]
-            # check for repreated edges:
-            if usededges == Reduce(usededges):
-                # for x in usededges:
-                #     if x not in edgelist:
-                #         return([usededges, edgelist, path])
-                # remove the used edges from the edgelist
-                newedges = list(remove_subset(edgelist, usededges))
-                # apply the procedure to the remaining edges
-                paint_unused = Paint(T, pot, newedges)
+        edge_paths = []
+        for path in pattern:
+            edge_paths += path[1]
+        usededges = [path[0] for path in edge_paths]
+        if usededges != Reduce(usededges):
+                pathlist.remove(pattern)
+        else:
+            newedges = list(remove_subset(Edges(T), usededges))
+            if newedges != []:
+                pattern.append(newedges)
+                pattern += [1]
 
-                if paint_unused != [[]]:
+    while len(pathlist) > 0:
+        for pattern in pathlist:
+            # check for he the label assigned after the first painting
+            if pattern[-1] != 1:
+                newpathlist.append(pattern)
+                pathlist.remove(pattern)
+
+            else:
+                pattern.remove(1)
+                # identify the free edges and then remove them from the data
+                newedges = pattern[-1]
+                pattern.remove(newedges)
+                paint_unused = PaintTop(T, pot, newedges)
+                if paint_unused == [[]]:
+                    if newedges != []:
+                        # newpathlist.append(pattern)
+                        pathlist.remove(pattern)
+                    else:
+                        pathlist.remove(pattern)
+                else:
                     templist = []
                     for p in paint_unused:
-                        templist.append(pattern + p[0])
-                    # templist = [pattern + p for p in paint_unused]
-                    pattern = []
-                    pattern = templist
-                    # return(pattern)
-                edgelist = newedges
-            else:
-                pattern = []
-        if pattern != []:
-            newpathlist.append(pattern)
+                        edge_paths = []
+                        for path in p:
+                            edge_paths += path[1]
+                        usededges = [path[0] for path in edge_paths]
+                        if usededges == Reduce(usededges):
+                            free_edges = list(remove_subset(newedges, usededges))
+                            newpattern = pattern + p
+                            if OverlapsThetaPaths(Thetapaths(newpattern), T) == 0:
+                                if Thetapaths(newpattern) == Reduce(Thetapaths(newpattern)):
+                                    if Psi_Test(newpattern, T, pot) == 1:
+                                        if free_edges == []:
+                                            newpathlist.append(newpattern)
+                                        else:
+                                            newpattern.append(free_edges)
+                                            newpattern += [1]
+                                            templist.append(newpattern)
 
+                pathlist.remove(pattern)
+                pathlist += templist
 
+    # templist = []
+    # for pattern in newpathlist:
+    #     if Psi_Test(pattern, T, pot) == 1:
+    #         templist.append(pattern)
 
     return(newpathlist)
 
 
-def Edges_below(e, edgelist):
+def Edge_paths_below(e, edgelist, T):
     edge = e
     templist = []
     for edge1 in edgelist:
         if IsAbove(edge, edge1) == 1:
-            templist.append(edge1)
+            #choose a vertex where the theta term is destroyed
+            vertices = Vertices_below(edge1, T)
+            paths  = [[edge1, v] for v in vertices]
+            for item in paths:
+                templist.append(item)
+    return(templist)
+
+def Vertices_below(loc, T):
+    vertices = Vertices(T)
+    templist = []
+    for v in vertices:
+        if IsAbove(loc, v) == 1:
+            templist.append(v)
     return(templist)
 
 def A_interactions(edgelist, pot, T):
@@ -182,102 +229,56 @@ def A_interactions(edgelist, pot, T):
         locations_above = []
         for location in Edges(T) + Leaves(T):
             if IsAbove(location, edge) == 1 and location != edge:
-                locations_above.append(location)
-        loc = list(prodlist([[edge], a_types, locations_above]))
+                for v in Vertices_below(location, T):
+                    locations_above.append([location, v])
+
+        loc = list(prodlist([a_types, locations_above]))
         a_list = a_list + [a for a in loc]
     return(a_list)
 
-def Mon_Part(mon, list):
+def Mon_Part(mon, list, T):
     templist = []
     for num in mon:
         if num > 0:
             subs = subsets(list, num)
-            templist.append(subs)
+            newsubs = []
+            for sub in subs:
+                if OverlapsThetaPaths1(sub, T) == 0:
+                    newsubs.append(sub)
+            templist.append(newsubs)
     return(templist)
 
-###############################################################################
-
-def MonomCheck(config, potential):
-    # Takes a pre-configuration and checks that the edge paths are able to
-    # kill the monomials in the A_type interactions.
-    numvars = len(potential[0])
-    count = 0
+def Thetapaths(config):
+    # returns the edge paths in a config
+    templist = []
     for path in config:
-        a = path[0]
-        b_types = path[1]
-        countlist = Zeros(numvars)
-        for item in b_types:
-            countlist[item[0][1]] += 1
-        if countlist == a[2]:
-            count += 1
-    if count == len(config):
-        return(1)
-    else:
-        return(0)
+        templist.append([path[0][2], path[0][3]])
+        # for index in range(0,len(path[0][0])):
+        #     if index != 0:
+        #         j = index
+        #         break
+        j = 0
+        for theta_type in range(0, len(path[0][0])):
+            index = path[0][0][theta_type]
+            edges = [[theta_type, p] for p in path[1][j:j+index]]
+            templist += edges
+            j += index
+    return(templist)
+
+
 
 ###############################################################################
 # MAIN PROCEDURES
 ###############################################################################
-
-def N(edge, config, T):
-    # counts the number of thetas and x_i terms entering a given edge. Note that
-    # x_i^n is counted n times.
-    theta_count = 0
-    deg_count = 0
-    for a in A_types(config):
-        if IsAbove(Location(a), edge) == 1:
-            theta_count += 1
-            deg_count += sum(a[2])
-    for c in C_types(config):
-        if IsAbove(Location(c), edge) == 1:
-            theta_count -= 1
-    return(theta_count + deg_count)
-
-def EnumerateConfigs(T, potential):
-    # Counts the number of confgurations associated to a given potential on a
-    # given tree T.
-    return(len(Configs(T, potential)))
-
-def Configs(T, potential):
-    # Takes as input a tree T and a potential with standard decomposition.
-    # First generates a list of pre-configurations and then filters out those
-    # which satusfy the constraints.
-    numvars = len(potential[0])
-    templist = []
-    preconfig = PreConfig(T, potential, numvars)
-    for config in preconfig:
-        if C_Test(config, T, potential) == 1:
-            if Psi_Test(config, T, potential) == 1:
-                if OverlapsThetaPaths(ThetaPaths(config), T) == 0:
-                    templist.append(config)
-    return(templist)
-
-
-def C_Test(config, T, potential):
-    # Check that each vertex of T has no more than numvars C-type interactions, and
-    # that they are all different. Equivalently, this checks that there are no more
-    # than numvars theta_i terms coming into any given vertx, and that we don't have
-    # two theta_i's of the same type being 'eaten' by the same vertex.
-    numvars = len(potential[0])
-    vertex_counter = []
-    theta_counter = []
-    append1 = vertex_counter.append
-    append2 = theta_counter.append
-    for vertex in Vertices(T):
-        count = 0
-        thetas = Zeros(numvars)
-        for path in ThetaPaths(config):
-            if vertex == path[2]:
-                thetatype = path[0][1]
-                thetas[thetatype] += 1
-                count += 1
-        append1(count)
-        append2(max(thetas))
-    if max(vertex_counter) <= numvars:
-        if max(theta_counter) <= 1:
-            return(1)
-    else:
-        return(0)
+def OverlapsThetaPaths1(theta_paths, T):
+    # special version of the proc below for primitive theta paths.
+    overlapcount = 0
+    for path1 in theta_paths:
+        for path2 in theta_paths:
+            if path1 != path2:
+                if len(Overlaps(path1, path2, T)) > 0:
+                    overlapcount += 1
+    return(overlapcount)
 
 def OverlapsThetaPaths(theta_paths, T):
     # For each theta path in t, tests that it has no intersections of
@@ -361,34 +362,26 @@ def Enough_Leaves_AboveA(interaction, config, T, numvars):
 # OPERATIONS ON CONFIGS
 ###############################################################################
 
-def C_types(config):
+def C_types(pattern):
     # Extracts a list of all C-type interactins in config, giving a list of
     # tuples (location, psi_type).
     templist = []
-    for item in config:
-        if type(item[1][0][1]) == int:
-            templist.append((item[1][2], item[1][0][1]))
-        else:
-            for path in item[1]:
-                templist.append((path[2], path[0][1]))
-        templist.append((item[2][2], item[2][0][1]))
+    for path in pattern:
+        c_int = [path[0][3][1], path[0][1]]
+        templist.append(c_int)
+    edge_paths = Thetapaths(pattern)
+    for path in edge_paths:
+        c_int = [path[1][1], path[0]]
+        templist.append(c_int)
     return(templist)
 
-def B_types(config):
-    # Extracts a list of all B-type interactions in config, giving a list of
-    # tuples (location, type)
-    templist = []
-    for item in config:
-        for path in item[1]:
-            templist.append(path[1], path[0][1])
-    return(templist)
-
-def A_types(config):
+def A_types(pattern):
     # Extracts a list of all A-type interactions in config, giving a list of
     # tuples (location, psi_type, mon, theta_type)
     templist = []
-    for item in config:
-        templist.append(item[0])
+    for path in pattern:
+        a_int = [path[0][3][0], path[0][2], path[0][0], path[0][1]]
+        templist.append(a_int)
     return(templist)
 
 def Location(interaction):
